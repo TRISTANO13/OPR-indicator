@@ -1,0 +1,66 @@
+//@version=5
+indicator("Stratégie de 15h30", overlay=true)
+
+// 🔧 Paramètres
+inputHour   = input.int(15, "Heure cible", minval=0, maxval=23)
+inputMinute = input.int(30, "Minute cible", minval=0, maxval=59)
+targetHour  = inputHour - 2  // décalage souhaité
+
+LineColorTop     = input.color(color.green, "Couleur ligne haute")
+LineColorBottom  = input.color(color.red, "Couleur ligne basse")
+LineColorMiddle  = input.color(color.orange, "Couleur ligne milieu")
+offsetTick       = input.float(1.0, "Décalage vertical (en ticks)")
+extendLength     = input.int(50, "Longueur ligne (bougies)")
+
+// 🎯 Détection de la bougie cible
+isTargetBar = (hour == targetHour and minute == inputMinute)
+
+// ➕ Création des lignes
+if isTargetBar
+    topY = high + offsetTick * syminfo.mintick
+    bottomY = low + offsetTick * syminfo.mintick
+    middleY = (topY + bottomY) / 2
+
+    if timeframe.period == "15"
+        line.new(x1=bar_index, y1=topY,    x2=bar_index + extendLength, y2=topY,    color=LineColorTop,    width=1, extend=extend.none)
+        line.new(x1=bar_index, y1=bottomY, x2=bar_index + extendLength, y2=bottomY, color=LineColorBottom, width=1, extend=extend.none)
+        line.new(x1=bar_index, y1=middleY, x2=bar_index + extendLength, y2=middleY, color=LineColorMiddle, width=1, extend=extend.none, style=line.style_dashed)
+
+// 🔄 EMA 20 sur graphique 5 minutes
+ema20 = request.security(syminfo.tickerid, "5", ta.ema(close, 20))
+plot(ema20, title="EMA 20 (M5)", color=color.green, linewidth=2)
+
+// 🔄 EMA 50 sur graphique 5 minutes
+ema50 = request.security(syminfo.tickerid, "5", ta.ema(close, 50))
+plot(ema50, title="EMA 50 (M5)", color=color.red, linewidth=2)
+
+// === Paramètres Supertrend ===
+Periods      = input.int(10, "ATR Period")
+Multiplier   = input.float(3.0, "ATR Multiplier")
+changeATR    = input.bool(true, "Use ATR or SMA(TR)?")
+tf           = input.timeframe("60", "Timeframe du Supertrend")  // 🔁 Choix du timeframe
+
+// === Fonction Supertrend ===
+supertrendFunc(_src, _atrlen, _mult, _useATR) =>
+    _atr2 = ta.sma(ta.tr, _atrlen)
+    _atr  = _useATR ? ta.atr(_atrlen) : _atr2
+
+    _up   = _src - _mult * _atr
+    _up1  = nz(_up[1], _up)
+    _up   := close[1] > _up1 ? math.max(_up, _up1) : _up
+
+    _dn   = _src + _mult * _atr
+    _dn1  = nz(_dn[1], _dn)
+    _dn   := close[1] < _dn1 ? math.min(_dn, _dn1) : _dn
+
+    var _trend = 1
+    _trend := _trend == -1 and close > _dn1 ? 1 : _trend == 1 and close < _up1 ? -1 : _trend
+
+    [_up, _dn, _trend]
+
+// === Récupérer les valeurs depuis un autre timeframe
+[up, dn, trend] = request.security(syminfo.tickerid, tf, supertrendFunc(hl2, Periods, Multiplier, changeATR))
+
+// === Tracés
+plot(trend == 1 ? up : na, "Supertrend Up (H1)", color=color.green, linewidth=2, style=plot.style_linebr)
+plot(trend == -1 ? dn : na, "Supertrend Down (H1)", color=color.red, linewidth=2, style=plot.style_linebr)
